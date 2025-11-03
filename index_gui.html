@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Isaac Sim Web GUI Viewer</title>
+  <style>
+    body {
+      margin: 0;
+      background: #000;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: black;
+    }
+  </style>
+</head>
+<body>
+  <video id="video" autoplay playsinline></video>
+
+  <script>
+    const isaacIp = "192.168.1.100"; // ← 改成你Isaac Sim机器的IP
+    const wsUrl = `ws://${isaacIp}:8211/webrtc`;
+    const ws = new WebSocket(wsUrl);
+    const pc = new RTCPeerConnection();
+    const video = document.getElementById('video');
+
+    ws.onmessage = async (evt) => {
+      const msg = JSON.parse(evt.data);
+      if (msg.type === "offer") {
+        await pc.setRemoteDescription(msg);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        ws.send(JSON.stringify(answer));
+      } else if (msg.type === "ice") {
+        await pc.addIceCandidate(msg.candidate);
+      }
+    };
+
+    pc.onicecandidate = (evt) => {
+      if (evt.candidate) ws.send(JSON.stringify({ type: "ice", candidate: evt.candidate }));
+    };
+
+    pc.ontrack = (evt) => {
+      video.srcObject = evt.streams[0];
+    };
+
+    // 鼠标 & 键盘事件传回服务器（IsaacSim需要支持）
+    function sendInput(type, data) {
+      ws.send(JSON.stringify({ type: "input", inputType: type, data }));
+    }
+
+    video.addEventListener("mousedown", (e) => sendInput("mouseDown", { x: e.offsetX, y: e.offsetY, button: e.button }));
+    video.addEventListener("mouseup",   (e) => sendInput("mouseUp",   { x: e.offsetX, y: e.offsetY, button: e.button }));
+    video.addEventListener("mousemove", (e) => sendInput("mouseMove", { x: e.offsetX, y: e.offsetY }));
+    window.addEventListener("keydown",  (e) => sendInput("keyDown",   { key: e.key }));
+    window.addEventListener("keyup",    (e) => sendInput("keyUp",     { key: e.key }));
+
+    ws.onopen = async () => {
+      console.log("✅ WebSocket connected, waiting for offer...");
+      ws.send(JSON.stringify({ type: "connect", role: "viewer" }));
+    };
+
+    ws.onclose = () => console.log("❌ WebSocket closed");
+    ws.onerror  = (err) => console.error("⚠️ WebSocket error:", err);
+  </script>
+</body>
+</html>
